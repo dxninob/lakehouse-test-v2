@@ -1,0 +1,187 @@
+Resources:
+  destinationBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: lakehouse-destination-bucket
+      VersioningConfiguration:
+        Status: Enabled
+  
+  deliveryRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: lakehouse-delivery-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref 'AWS::AccountId'
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::740546916706:policy/service-role/AWSGlueServiceRole-lakehouse-EZCRC-s3Policy
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  deliveryStreamCounty:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: 
+      DeliveryStreamName: lakehouse-delivery-stream-county
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        RoleARN: !GetAtt deliveryRole.Arn
+        BucketARN: !Join 
+          - ''
+          - - 'arn:aws:s3:::'
+            - !Ref destinationBucket
+        BufferingHints:
+          SizeInMBs: 5
+          IntervalInSeconds: 60
+        CompressionFormat: UNCOMPRESSED
+        EncryptionConfiguration:
+          NoEncryptionConfig: NoEncryption
+        ErrorOutputPrefix: error/
+        Prefix: county_level_data/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/
+  
+  deliveryStreamVaccinations:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: 
+      DeliveryStreamName: lakehouse-delivery-stream-vaccinations
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        RoleARN: !GetAtt deliveryRole.Arn
+        BucketARN: !Join 
+          - ''
+          - - 'arn:aws:s3:::'
+            - !Ref destinationBucket
+        BufferingHints:
+          SizeInMBs: 5
+          IntervalInSeconds: 60
+        CompressionFormat: UNCOMPRESSED
+        EncryptionConfiguration:
+          NoEncryptionConfig: NoEncryption
+        ErrorOutputPrefix: error/
+        Prefix: vaccinations_by_county/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/
+  
+  deliveryStreamCases:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: 
+      DeliveryStreamName: lakehouse-delivery-stream-cases
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        RoleARN: !GetAtt deliveryRole.Arn
+        BucketARN: !Join 
+          - ''
+          - - 'arn:aws:s3:::'
+            - !Ref destinationBucket
+        BufferingHints:
+          SizeInMBs: 5
+          IntervalInSeconds: 60
+        CompressionFormat: UNCOMPRESSED
+        EncryptionConfiguration:
+          NoEncryptionConfig: NoEncryption
+        ErrorOutputPrefix: error/
+        Prefix: cases_in_ct_schools/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/
+
+  standardizedBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: lakehouse-standardized-data
+      VersioningConfiguration:
+        Status: Enabled
+  
+  curatedBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: lakehouse-curated-data
+      VersioningConfiguration:
+        Status: Enabled
+  
+  RedshiftServerlessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lakehouse-redshift-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "redshift.amazonaws.com"
+                - "glue.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonRedshiftFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  RedshiftServerlessSpectrumRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lakehouse-spectrum-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'redshift.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonRedshiftFullAccess
+        - arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess
+
+  lakehouseNamespace:
+    Type: AWS::RedshiftServerless::Namespace
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AdminUsername: admin
+      AdminUserPassword: Secret123
+      DbName: dev
+      DefaultIamRoleArn: !GetAtt RedshiftServerlessRole.Arn
+      IamRoles: 
+        - !GetAtt RedshiftServerlessSpectrumRole.Arn
+        - !GetAtt RedshiftServerlessRole.Arn
+      NamespaceName: lakehouse-namespace
+
+  lakehouseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Amazon-QuickSight-access
+      GroupName: Amazon-QuickSight-access
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 5439
+          ToPort: 5439
+          CidrIp: 52.23.63.224/27          
+
+  lakehouseWorkgroup:
+    Type: AWS::RedshiftServerless::Workgroup
+    DependsOn: lakehouseNamespace
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      NamespaceName: lakehouse-namespace
+      WorkgroupName: lakehouse-workgroup
+      PubliclyAccessible: true
+      SecurityGroupIds:
+        - !GetAtt lakehouseSecurityGroup.GroupId
